@@ -10,5 +10,5 @@ npm install
 
 **Run the application**
 ```
-npm start:dev
+npm run start:dev
 ```
