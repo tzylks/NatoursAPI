@@ -12,3 +12,5 @@ npm install
 ```
 npm run start:dev
 ```
+
+## Visit localhost:8000/api/v1/tours

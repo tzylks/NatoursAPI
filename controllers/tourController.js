@@ -1,26 +1,27 @@
 import Tour from './../models/tourModel.js'
-
+import APIFeatures from './../utils/apiFeatures.js';
 //FOR WHEN JSON FILE IS PRESENT, BUT NOT NEEDED
 // const tours = JSON.parse(fs.readFileSync('./dev-data/data/tours-simple.json'))
 
 // ROUTE HANDLERS
+
+const aliasTopTours = (req, res, next) => {
+    req.query.limit = '5'
+    req.query.sort = '-ratingsAverage,price'
+    req.query.fields = 'name,price,ratingsAverage,summary,difficulty'
+    next()
+};
+
+
 const getAllTours = async (req, res) => {
     try {
-        
-        //BUILD QUERY
-        console.log(req.query)
-        const queryObject = {...req.query}
-        //REMOVE THESE ELEMENTS FROM THE QUERYOBJECT
-        const exludedFields = ['page', 'sort', 'limit', 'fields']
-        exludedFields.forEach(el => delete queryObject[el])
-        console.log(queryObject)
-
-        //USING THE PARAMS e.g.(/api/v1/tours?difficulty=easy&duration=5) REQ.QUERY RETURNS OBJECT {duration: 5, difficulty: "easy"}
-        const query = await Tour.find(queryObject)
-        // const query = await Tour.find().where('duration').equals(5).where('difficulty').equals('easy')
-
         //EXECUTE QUERY (NEEDED TO SEPERATE THIS SO THAT WE CAN USE MONGOOSE METHODS ON QUERY)
-        const tours = await query
+        const features = new APIFeatures(Tour.find(), req.query)
+            .filter()
+            .sort()
+            .limitFields()
+            .paginate()
+        const tours = await features.query
 
         //SEND RESPONSE
         res.status(200).json({
@@ -32,7 +33,7 @@ const getAllTours = async (req, res) => {
             }
         })
     } catch (err) {
-        res.send(404).json({
+        res.status(404).json({
             status: 'Failed',
             message: err
         })
@@ -115,4 +116,101 @@ const deleteTour = async (req, res) => {
     }
 }
 
-export { getAllTours, getTour, createTour, updateTour, deleteTour }
+//AGGREGATION PIEPLINE FROM MONGO THAT MONGOOSE CAN USE
+const getTourStats = async (req, res) => {
+    try {
+        const stats = await Tour.aggregate([
+            {
+                $match: { ratingsAverage: { $gte: 4.5 } }
+            },
+            {
+                $group: {
+                    _id: { $toUpper: '$difficulty' },
+                    // _id: '$ratingsAverage',
+                    numTours: { $sum: 1 },
+                    numRatings: { $sum: '$ratingsQuantity' },
+                    avgRating: { $avg: '$ratingsAverage' },
+                    avgPrice: { $avg: '$price' },
+                    minPrice: { $min: '$price' },
+                    maxPrice: { $max: '$price' }
+                }
+            },
+            {
+                $sort: { avgPrice: 1 }
+            },
+            // {
+            //     $match: { _id: { $ne: 'EASY' } }
+            // }
+        ])
+
+        res.status(200).json({
+            status: "success",
+            data: {
+                stats: stats
+            }
+        })
+
+    } catch (err) {
+        res.status(404).json({
+            status: "Failed",
+            message: `${err}`
+        })
+    }
+}
+
+const getMonthlyPlan = async (req, res) => {
+    try {
+        const year = req.params.year * 1 //2021
+        const plan = await Tour.aggregate([
+            {
+                $unwind: '$startDates'
+            },
+            {
+                $match: {
+                    startDates: { 
+                        $gte: new Date(`${year}-01-01`),
+                        $lte: new Date(`${year}-12-31`)
+                     }
+                }
+            },
+            {
+                $group: {
+                    _id: { $month: '$startDates'},
+                    numTourStarts: { $sum: 1 },
+                    tours: { $push: '$name'  }
+                }
+            },
+            {
+                $addFields: { 
+                    month: '$_id'
+                 }
+            },
+            {
+                $project: {
+                    _id: 0
+                }
+            },
+            {
+                $sort: { numOfTourStarts: -1 }
+            },
+            {
+                $limit: 12
+            }
+        ])
+
+        res.status(200).json({
+            status: "success",
+            data: {
+                plan
+            }
+        })
+
+    } catch (err) {
+        res.status(404).json({
+            status: "Failed",
+            message: `${err}`
+        })
+    }
+}
+
+export { getAllTours, getTour, createTour, updateTour, deleteTour, aliasTopTours, getTourStats, getMonthlyPlan }
